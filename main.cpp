@@ -39,6 +39,30 @@ const float FLOOR_Y = 0.0f;
 const float TOWER_HEIGHT = 20.0f;
 const float TOWER_RADIUS = 5.0f;
 
+bool fogEnabled = false;
+
+// Direção da luz para projeção de sombra (paralela)
+Vec3 lightDir(-0.5f, -1.0f, -0.3f); // qualquer direção inclinada para baixo
+GLfloat shadowMat[16];
+
+void initShadowMatrix() {
+    // Projeção no plano y = 0
+    float lx = lightDir.x;
+    float ly = lightDir.y;
+    float lz = lightDir.z;
+    if (std::fabs(ly) < 1e-3f) ly = (ly >= 0 ? 1e-3f : -1e-3f);
+
+    // Matriz em ordem column-major (OpenGL) para:
+    // x' = x - (lx/ly)*y
+    // y' = 0
+    // z' = z - (lz/ly)*y
+    shadowMat[0]  = 1.0f;        shadowMat[4]  = -lx/ly;   shadowMat[8]  = 0.0f;  shadowMat[12] = 0.0f;
+    shadowMat[1]  = 0.0f;        shadowMat[5]  = 0.0f;     shadowMat[9]  = 0.0f;  shadowMat[13] = 0.0f;
+    shadowMat[2]  = 0.0f;        shadowMat[6]  = -lz/ly;   shadowMat[10] = 1.0f;  shadowMat[14] = 0.0f;
+    shadowMat[3]  = 0.0f;        shadowMat[7]  = 0.0f;     shadowMat[11] = 0.0f;  shadowMat[15] = 1.0f;
+}
+
+
 // Boids
 struct Boid {
     Vec3 pos;
@@ -289,7 +313,7 @@ void drawTower() {
     glPopMatrix();
 }
 
-void drawSingleBoid(const Boid& b) {
+void drawSingleBoid(const Boid& b, bool shadow = false) {
     glPushMatrix();
         glTranslatef(b.pos.x, b.pos.y, b.pos.z);
 
@@ -299,7 +323,7 @@ void drawSingleBoid(const Boid& b) {
         float yaw = std::atan2(v.x, v.z) * 180.0f / 3.14159265f;
         glRotatef(yaw, 0, 1, 0);
 
-        // Espessura do “corpo” (3D)
+        // Espessura do corpo (3D)
         float thickness = 0.25f;
 
         // Animação das asas (sobe/desce em Y)
@@ -307,29 +331,38 @@ void drawSingleBoid(const Boid& b) {
         float wingOffset = 0.8f * std::sin(a);
 
         // Vértices top/bottom do poliedro
-        GLfloat noseTop[3]      = { 0.0f,  thickness,  2.0f };
-        GLfloat noseBottom[3]   = { 0.0f, -thickness,  2.0f };
+        GLfloat noseTop[3]       = { 0.0f,  thickness,  2.0f };
+        GLfloat noseBottom[3]    = { 0.0f, -thickness,  2.0f };
 
-        GLfloat tailTop[3]      = { 0.0f,  thickness, -1.8f };
-        GLfloat tailBottom[3]   = { 0.0f, -thickness, -1.8f };
+        GLfloat tailTop[3]       = { 0.0f,  thickness, -1.8f };
+        GLfloat tailBottom[3]    = { 0.0f, -thickness, -1.8f };
 
-        GLfloat leftWingTop[3]  = { -2.0f, wingOffset + thickness,  0.0f };
-        GLfloat leftWingBottom[3]= { -2.0f, wingOffset - thickness, 0.0f };
+        GLfloat leftWingTop[3]   = { -2.0f, wingOffset + thickness,  0.0f };
+        GLfloat leftWingBottom[3]= { -2.0f, wingOffset - thickness,  0.0f };
 
-        GLfloat rightWingTop[3]  = {  2.0f, wingOffset + thickness, 0.0f };
-        GLfloat rightWingBottom[3]= { 2.0f, wingOffset - thickness, 0.0f };
+        GLfloat rightWingTop[3]   = {  2.0f, wingOffset + thickness, 0.0f };
+        GLfloat rightWingBottom[3]= {  2.0f, wingOffset - thickness, 0.0f };
+
+        auto setRed = [&]() {
+            if (shadow) glColor3f(0.0f, 0.0f, 0.0f);
+            else        glColor3f(1.0f, 0.2f, 0.2f);
+        };
+        auto setYellow = [&]() {
+            if (shadow) glColor3f(0.0f, 0.0f, 0.0f);
+            else        glColor3f(1.0f, 1.0f, 0.0f);
+        };
 
         // ----- Faces de cima (triângulos) -----
         glBegin(GL_TRIANGLES);
             // “nariz” vermelho (topo)
             glNormal3f(0, 1, 0);
-            glColor3f(1.0f, 0.2f, 0.2f);
+            setRed();
             glVertex3fv(noseTop);
             glVertex3fv(rightWingTop);
             glVertex3fv(leftWingTop);
 
             // parte de trás amarela (topo)
-            glColor3f(1.0f, 1.0f, 0.0f);
+            setYellow();
             glVertex3fv(tailTop);
             glVertex3fv(leftWingTop);
             glVertex3fv(rightWingTop);
@@ -339,13 +372,13 @@ void drawSingleBoid(const Boid& b) {
         glBegin(GL_TRIANGLES);
             // nariz vermelho (baixo)
             glNormal3f(0, -1, 0);
-            glColor3f(1.0f, 0.2f, 0.2f);
+            setRed();
             glVertex3fv(noseBottom);
             glVertex3fv(leftWingBottom);
             glVertex3fv(rightWingBottom);
 
             // parte de trás amarela (baixo)
-            glColor3f(1.0f, 1.0f, 0.0f);
+            setYellow();
             glVertex3fv(tailBottom);
             glVertex3fv(rightWingBottom);
             glVertex3fv(leftWingBottom);
@@ -355,6 +388,7 @@ void drawSingleBoid(const Boid& b) {
         glBegin(GL_QUADS);
             // Lado entre nariz e asa direita
             glNormal3f(1, 0, 0);
+            setYellow();
             glVertex3fv(noseTop);
             glVertex3fv(noseBottom);
             glVertex3fv(rightWingBottom);
@@ -395,9 +429,29 @@ void drawSingleBoid(const Boid& b) {
 
 void drawBoids() {
     for (const auto& b : boids) {
-        drawSingleBoid(b);
+        drawSingleBoid(b, false);
     }
 }
+
+void drawBoidShadows() {
+    // Desenha sombras dos boids projetadas no chão (y=0)
+    glDisable(GL_LIGHTING);
+    glColor3f(0.0f, 0.0f, 0.0f);
+
+    glPushMatrix();
+        // aplica matriz de projeção da sombra
+        glMultMatrixf(shadowMat);
+        // levanta um pouquinho pra evitar z-fighting com o piso
+        glTranslatef(0.0f, 0.01f, 0.0f);
+
+        for (const auto& b : boids) {
+            drawSingleBoid(b, true); // modo sombra (cor preta)
+        }
+    glPopMatrix();
+
+    glEnable(GL_LIGHTING);
+}
+
 
 void drawObstacles() {
     for (const auto& o : obstacles) {
@@ -503,6 +557,22 @@ void setupLighting() {
     glMaterialfv(GL_FRONT_AND_BACK, GL_SHININESS, shininess);
 }
 
+void setupFog() {
+    // Cor da neblina (igual ao céu pra ficar suave)
+    GLfloat fogColor[4] = {0.5f, 0.7f, 1.0f, 1.0f};
+
+    glFogi(GL_FOG_MODE, GL_EXP2);        // GL_LINEAR, GL_EXP ou GL_EXP2
+    glFogfv(GL_FOG_COLOR, fogColor);
+    glFogf(GL_FOG_DENSITY, 0.02f);       // + denso se aumentar esse valor
+    glHint(GL_FOG_HINT, GL_NICEST);
+
+    // Estes dois só importam pra GL_LINEAR, mas não atrapalham:
+    glFogf(GL_FOG_START, 20.0f);
+    glFogf(GL_FOG_END,   120.0f);
+
+    glDisable(GL_FOG); // começa desligado
+}
+
 // -------------------------------------------------------
 // Atualização da simulação
 // -------------------------------------------------------
@@ -572,10 +642,17 @@ void display() {
     setupCamera();
     setupLighting();
 
+    if (fogEnabled)
+        glEnable(GL_FOG);
+    else
+        glDisable(GL_FOG);
+
     drawFloor();
     drawTower();
     drawObstacles();
     drawTarget();
+
+    drawBoidShadows();
     drawBoids();
 
     glutSwapBuffers();
@@ -606,6 +683,11 @@ void keyboard(unsigned char key, int x, int y) {
     case 'q':
     case 'Q':
         std::exit(0);
+        break;
+
+    case 'f':
+    case 'F':
+        fogEnabled = !fogEnabled;   // alterna entre ligado/desligado
         break;
 
     case '1':
@@ -746,6 +828,7 @@ void initGL() {
     glClearColor(0.5f, 0.7f, 1.0f, 1.0f); // céu
 
     setupLighting();
+    setupFog();
 }
 
 // -------------------------------------------------------
@@ -763,6 +846,7 @@ int main(int argc, char** argv) {
     initGL();
     initBoids();
     initObstacles();
+    initShadowMatrix();
 
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
